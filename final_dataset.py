@@ -8,25 +8,28 @@ import sys
 from scipy.spatial import KDTree
 
 # ==============================================================================
-# STEP 1, 2, 3, 4 (Unchanged)
+# STEP 1: SETUP (UPDATED)
 # ==============================================================================
 # --- Configure your file paths and settings here ---
 
-# Define the time range for the analysis
-start_date_str = '2024-01-01'
-end_date_str = '2025-06-30'
+# UPDATED: Define the full time range of your new data
+start_date_str = '2020-01-01'
+end_date_str = '2025-06-10'
 
 # Define the output directory for the final file
 out_dir = "./final_model_data"
 os.makedirs(out_dir, exist_ok=True)
 
-# --- Set the paths to all your data files ---
+# UPDATED: Set the paths to your new 8-day composite data folders
 occurrence_file = r'C:\Sharko\Occurrence.tsv'
-chl_folder = r'C:\Sharko\chlorophyll_data'
-sst_folder = r'C:\Sharko\sst_data'
-ssh_folder = r'C:\Sharko\ssha-data'
-sss_folder = r'C:\Sharko\sss-data'
+chl_folder = r'C:\Sharko\chlorophyll_data_8day' # Changed
+sst_folder = r'C:\Sharko\sst_data_8day'         # Changed
+ssh_folder = r'C:\Sharko\SSHA_New'
+sss_folder = r'C:\Sharko\SSS_New'
 
+# ==============================================================================
+# STEP 2, 3, 4 (Unchanged)
+# ==============================================================================
 print("STEP 2: Loading and preparing shark presence data...")
 required_columns = ['eventDate', 'decimalLatitude', 'decimalLongitude']
 try:
@@ -48,7 +51,9 @@ print(f"-> Found {len(presence_data)} valid shark presence records.")
 
 print("STEP 3: Generating pseudo-absence data...")
 if len(presence_data) > 0:
-    num_pseudo_points = len(presence_data)
+    # UPDATED: Generate twice as many pseudo-absence points as presence points (2:1 ratio).
+    # This gives the model a richer set of "background" environmental conditions to learn from.
+    num_pseudo_points = len(presence_data) * 2
     min_lat, max_lat = presence_data['lat'].min(), presence_data['lat'].max()
     min_lon, max_lon = presence_data['lon'].min(), presence_data['lon'].max()
     start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
@@ -71,17 +76,18 @@ print(f"-> Created a combined dataset with {len(combined_points)} total points."
 
 
 # ==============================================================================
-# STEP 5: LOAD SATELLITE DATA (REVISED)
+# STEP 5: LOAD SATELLITE DATA (UPDATED)
 # ==============================================================================
 print("STEP 5: Loading satellite data functions...")
 
 def _build_time_coordinate_from_filenames(ds, files):
     """
-    FIX for CHL/SST data: Manually create a time coordinate from dates in filenames.
+    UPDATED: Manually create a time coordinate from 8-day composite filenames.
     """
-    # Assumes filename format like '...YYYYMMDD...'
+    # Assumes filename format like '...YYYYMMDD_YYYYMMDD...'
     try:
-        times = [pd.to_datetime(os.path.basename(f).split('.')[1], format='%Y%m%d') for f in files]
+        # We parse the START date of the 8-day period from the filename
+        times = [pd.to_datetime(os.path.basename(f).split('.')[1].split('_')[0], format='%Y%m%d') for f in files]
         ds = ds.assign_coords(time=times)
         print("      -> Successfully built time coordinate from filenames.")
         return ds
@@ -120,7 +126,6 @@ def open_multifile_dataset(folder_path, lat_bounds, lon_bounds, needs_time_coord
     print("      Cropping dataset (optimization)...")
     try:
         cropped_ds = ds.sel(lat=slice(max(lat_bounds), min(lat_bounds)), lon=slice(min(lon_bounds), max(lon_bounds)))
-        # FIX for SSS: Check if cropping resulted in an empty dataset
         if cropped_ds.dims['lat'] == 0 or cropped_ds.dims['lon'] == 0:
             print("      ⚠️ WARNING: The geographic bounds of this dataset do not overlap with your points. This variable will be skipped.")
             return None
@@ -131,33 +136,28 @@ def open_multifile_dataset(folder_path, lat_bounds, lon_bounds, needs_time_coord
         return ds
 
 # ==============================================================================
-# STEP 6: EXTRACT ENVIRONMENTAL DATA (COMPLETELY REVISED)
+# STEP 6: EXTRACT ENVIRONMENTAL DATA (UNCHANGED LOGIC)
 # ==============================================================================
 print("\nSTEP 6: Extracting environmental data for each variable...")
 
 def _extract_track_data_with_kdtree(ds, variable, lookup_df):
     """
-    FIX for SSHA: Uses a KD-Tree for fast nearest-neighbor search on non-gridded data.
+    Uses a KD-Tree for fast nearest-neighbor search on non-gridded data (like SSHA).
     """
     print(f"   Using specialized KD-Tree for track data...")
-    # 1. Prepare the satellite data points (time, lat, lon)
-    # Convert time to numeric for distance calculation
     sat_time = ds['time'].values.astype(np.int64) // 10**9 
     sat_lat = ds['lat'].values
     sat_lon = ds['lon'].values
     sat_points = np.vstack([sat_time, sat_lat, sat_lon]).T
     
-    # 2. Prepare the lookup points (your shark/pseudo-absence points)
     lookup_time = lookup_df['time'].values.astype(np.int64) // 10**9
     lookup_lat = lookup_df['lat'].values
     lookup_lon = lookup_df['lon'].values
     lookup_points = np.vstack([lookup_time, lookup_lat, lookup_lon]).T
     
-    # 3. Build the KD-Tree and query it
     tree = KDTree(sat_points)
     _, indices = tree.query(lookup_points, k=1)
     
-    # 4. Get the environmental values using the found indices
     return ds[variable].values[indices]
 
 if len(combined_points) > 0:
@@ -181,7 +181,7 @@ if len(combined_points) > 0:
                 needs_time_coord=source.get('needs_time', False)
             )
             
-            if ds is None: continue # Skip if cropping failed (e.g., SSS)
+            if ds is None: continue
 
             print(f"   Extracting '{source['variable']}' values...")
             if source['is_gridded']:
@@ -191,7 +191,7 @@ if len(combined_points) > 0:
                     time=xr.DataArray(final_dataset['time'], dims='points'),
                     method='nearest'
                 ).values
-            else: # Use the KD-Tree method for non-gridded data
+            else: 
                 extracted_values = _extract_track_data_with_kdtree(ds, source['variable'], final_dataset)
             
             final_dataset[name] = extracted_values
@@ -200,21 +200,32 @@ if len(combined_points) > 0:
             print(f"   ❌ ERROR processing {name}. This variable will be skipped. Error: {e}")
 
     # ==============================================================================
-    # STEP 7 & 8 (Unchanged)
+    # STEP 7 & 8 (LOGIC ADJUSTED)
     # ==============================================================================
     print("\nSTEP 7: Finalizing dataset...")
     final_dataset['day_of_year'] = final_dataset['time'].dt.dayofyear
     final_dataset['day_sin'] = np.sin(2 * np.pi * final_dataset['day_of_year'] / 365)
     final_dataset['day_cos'] = np.cos(2 * np.pi * final_dataset['day_of_year'] / 365)
-    final_dataset = final_dataset.drop(columns=['time', 'day_of_year'])
+    final_dataset = final_dataset.drop(columns=['day_of_year'])
+    
     print(f"   Original rows: {len(final_dataset)}")
     final_dataset.dropna(inplace=True)
     print(f"   Rows with complete data: {len(final_dataset)}")
     print("-> Final dataset prepared.")
 
     if not final_dataset.empty:
-        output_path = os.path.join(out_dir, 'model_training_dataset.csv')
+        # --- NEW: Reorder columns to have 'presence' at the end ---
+        print("   Reordering columns for clarity...")
+        cols = final_dataset.columns.tolist()
+        # Move the 'presence' column to the very end of the list
+        cols.insert(len(cols), cols.pop(cols.index('presence')))
+        final_dataset = final_dataset[cols]
+        print("   Columns reordered.")
+
+        # BUG FIX: Ensure filename extension matches compression type
+        output_path = os.path.join(out_dir, 'model_training_dataset.csv.gz')
         final_dataset.to_csv(output_path, index=False, compression='gzip')
+
         print("\n" + "="*60)
         print(f"✅ SUCCESS! Your model-ready dataset is saved to: {output_path}")
         print("="*60)

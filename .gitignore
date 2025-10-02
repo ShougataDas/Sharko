@@ -9,6 +9,9 @@ ssha-data/
 sss-data/
 sst_data/
 sst_data_8day/
+check_occur.py/
+SSS_New/
+SSHA_New/
 
 # Ignore large data and output files by their extension
 *.nc

@@ -1,2 +1,2 @@
-with open(r"C:\Sharko\sst_data\AQUA_MODIS.20240105.L3m.DAY.SST.sst.4km.nc", "rb") as f:
+with open(r"SSHA_New/SRL_OPRSSHA_2PfS138_0637_20200318_001517_20200318_015316.EUM_subsetted.nc", "rb") as f:
     print(f.read(20))
